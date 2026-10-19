@@ -1,13 +1,16 @@
-
 {
   "name": "coc-upgrade-notifier",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "Clash of Clans Telegram Upgrade Notifier",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node bot.js"
   },
   "dependencies": {
-    "discord.js": "^14.21.0",
-    "express": "^5.1.0"
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.7.0",
+    "dotenv": "^16.4.7",
+    "node-cron": "^3.0.3",
+    "node-telegram-bot-api": "^0.66.0"
   }
 }
