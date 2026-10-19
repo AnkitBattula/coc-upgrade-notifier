@@ -1,18 +1,8 @@
 {
-  "name": "coc-telegram-upgrade-bot",
-  "version": "1.0.0",
-  "description": "Clash of Clans Telegram Upgrade Timer Notification Bot",
-  "main": "bot.js",
-  "scripts": {
-    "start": "node bot.js"
-  },
-  "engines": {
-    "node": ">=20"
-  },
   "dependencies": {
     "axios": "^1.7.9",
+    "better-sqlite3": "^11.7.0",
     "dotenv": "^16.4.7",
-    "mongoose": "^8.8.0",
     "node-cron": "^3.0.3",
     "node-telegram-bot-api": "^0.66.0"
   }
