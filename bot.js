@@ -1,26 +1,22 @@
+// bot.js
+
 require("dotenv").config();
 
 const TelegramBot = require("node-telegram-bot-api");
 const Database = require("better-sqlite3");
 const cron = require("node-cron");
-const fs = require("fs");
 
 
 // ===============================
 // CONFIG
 // ===============================
 
-const TOKEN = process.env.TELEGRAM_TOKEN;
-
-if (!TOKEN) {
-    console.log("Missing TELEGRAM_TOKEN");
-    process.exit(1);
-}
-
-
-const bot = new TelegramBot(TOKEN, {
-    polling:true
-});
+const bot = new TelegramBot(
+    process.env.TELEGRAM_TOKEN,
+    {
+        polling:true
+    }
+);
 
 
 // ===============================
@@ -32,28 +28,23 @@ const db = new Database("coc.db");
 
 db.exec(`
 
-CREATE TABLE IF NOT EXISTS users(
-telegram_id INTEGER PRIMARY KEY
-);
-
-
 CREATE TABLE IF NOT EXISTS players(
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-telegram_id INTEGER,
-tag TEXT,
-updated INTEGER
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER,
+    tag TEXT,
+    updated INTEGER
 );
 
 
 CREATE TABLE IF NOT EXISTS upgrades(
-id INTEGER PRIMARY KEY AUTOINCREMENT,
-telegram_id INTEGER,
-tag TEXT,
-item_id INTEGER,
-name TEXT,
-level INTEGER,
-finish INTEGER,
-notified INTEGER DEFAULT 0
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    telegram_id INTEGER,
+    tag TEXT,
+    item_id INTEGER,
+    name TEXT,
+    level INTEGER,
+    finish INTEGER,
+    notified INTEGER DEFAULT 0
 );
 
 `);
@@ -61,7 +52,7 @@ notified INTEGER DEFAULT 0
 
 
 // ===============================
-// ITEM NAMES
+// ITEM NAME DATABASE
 // ===============================
 
 const ITEMS = {
@@ -72,33 +63,36 @@ const ITEMS = {
 1000003:"Air Defense",
 1000004:"Wizard Tower",
 1000005:"Hidden Tesla",
-1000006:"Spell Tower",
+1000006:"Bomb Tower",
 
 1000026:"Inferno Tower",
 1000027:"Scattershot",
+1000067:"Town Hall",
 
 28000000:"Barbarian King",
 28000001:"Archer Queen",
 28000002:"Grand Warden",
 28000006:"Royal Champion",
+28000005:"Battle Machine",
 
 26000000:"Lightning Spell",
 26000001:"Healing Spell",
 
 4000000:"Barbarian",
 4000001:"Archer",
-4000002:"Giant"
+4000002:"Giant",
+4000041:"Builder Base Troop"
 
 };
-
 
 
 function itemName(id){
 
 return ITEMS[id] || 
-`Unknown Item ${id}`;
+`Unknown ID ${id}`;
 
 }
+
 
 
 
@@ -106,38 +100,36 @@ return ITEMS[id] ||
 // TIME FORMAT
 // ===============================
 
+function formatTime(sec){
 
-function formatTime(seconds){
-
-if(seconds<=0)
+if(sec<=0)
 return "Finished";
 
 
-let d=Math.floor(seconds/86400);
+let d=Math.floor(sec/86400);
 
-seconds%=86400;
-
-let h=Math.floor(seconds/3600);
-
-seconds%=3600;
-
-let m=Math.floor(seconds/60);
+sec%=86400;
 
 
-let result="";
+let h=Math.floor(sec/3600);
+
+sec%=3600;
 
 
-if(d)
-result+=d+"d ";
-
-if(h)
-result+=h+"h ";
-
-if(m)
-result+=m+"m";
+let m=Math.floor(sec/60);
 
 
-return result || "less than 1m";
+let s="";
+
+
+if(d) s+=`${d}d `;
+
+if(h) s+=`${h}h `;
+
+if(m) s+=`${m}m`;
+
+
+return s || "1m";
 
 }
 
@@ -148,81 +140,31 @@ return result || "less than 1m";
 // START
 // ===============================
 
-
 bot.onText(/\/start/,msg=>{
 
 
-let id=msg.chat.id;
-
-
-db.prepare(
-"INSERT OR IGNORE INTO users VALUES(?)"
-).run(id);
-
-
-
-bot.sendMessage(id,
+bot.sendMessage(
+msg.chat.id,
 
 `
 🏰 COC Upgrade Notifier
 
 Commands:
 
+/paste
+Paste raw JSON
+
 /upload
-Upload COC JSON
+Upload JSON file
 
 /status
-Current upgrades
-
-/players
-Tracked accounts
+Show upgrades
 
 /clear
-Remove data
-
-/help
-Help
-
-Upload your exported JSON file.
-`
-
-);
-
-
-});
-
-
-
-
-
-// ===============================
-// HELP
-// ===============================
-
-
-bot.onText(/\/help/,msg=>{
-
-
-bot.sendMessage(msg.chat.id,
-
-`
-Commands:
-
-📤 /upload
-Send JSON file
-
-📊 /status
-Show running upgrades
-
-👤 /players
-Show accounts
-
-🗑 /clear
 Delete data
 
-Automatic alerts enabled.
+/help
 `
-
 );
 
 
@@ -231,68 +173,116 @@ Automatic alerts enabled.
 
 
 
-
 // ===============================
-// JSON UPLOAD
+// PASTE MODE
 // ===============================
 
+let waitingJSON={};
 
-bot.on("document",async msg=>{
+
+bot.onText(/\/paste/,msg=>{
+
+
+waitingJSON[msg.chat.id]=true;
+
+
+bot.sendMessage(
+msg.chat.id,
+"📋 Send raw JSON now"
+);
+
+
+});
+
+
+
+bot.on("message",msg=>{
 
 
 let id=msg.chat.id;
 
 
-let file=msg.document;
-
-
-
-if(!file.file_name.endsWith(".json")){
-
-return bot.sendMessage(
-id,
-"❌ Upload JSON file only"
-);
-
-}
-
-
+if(
+waitingJSON[id] &&
+msg.text &&
+msg.text.startsWith("{")
+){
 
 try{
 
 
-let url=
-await bot.getFileLink(file.file_id);
+let json=JSON.parse(msg.text);
 
 
-const axios =
-require("axios");
-
-
-let response =
-await axios.get(url);
-
-
-let json=response.data;
+waitingJSON[id]=false;
 
 
 saveJSON(id,json);
-
 
 
 }
 
 catch(e){
 
-console.log(e);
-
 bot.sendMessage(
 id,
-"❌ JSON reading failed"
+"❌ Invalid JSON"
 );
 
 }
 
+
+}
+
+
+
+});
+// ===============================
+// JSON FILE UPLOAD
+// ===============================
+
+bot.on("document", async(msg)=>{
+
+const id = msg.chat.id;
+
+if(!msg.document.file_name.endsWith(".json")){
+
+return bot.sendMessage(
+id,
+"❌ Send only JSON files"
+);
+
+}
+
+
+try{
+
+const url = await bot.getFileLink(
+msg.document.file_id
+);
+
+
+const axios = require("axios");
+
+
+const res = await axios.get(url);
+
+
+saveJSON(id,res.data);
+
+
+}
+
+catch(err){
+
+console.log(err);
+
+bot.sendMessage(
+id,
+"❌ Failed reading JSON"
+);
+
+}
 
 
 });
@@ -300,14 +290,12 @@ id,
 
 
 
-
 // ===============================
-// SAVE JSON
+// SAVE JSON ENGINE
 // ===============================
 
 
 function saveJSON(chat,json){
-
 
 
 if(!json.tag){
@@ -321,14 +309,41 @@ chat,
 
 
 
-let tag=json.tag;
+const tag=json.tag;
 
 
+const baseTime =
+json.timestamp ||
+Math.floor(Date.now()/1000);
+
+
+
+
+// remove old data
+
+db.prepare(
+`
+DELETE FROM upgrades
+WHERE telegram_id=? AND tag=?
+`
+).run(
+chat,
+tag
+);
+
+
+
+
+// save player
 
 db.prepare(
 `
 INSERT INTO players
-(telegram_id,tag,updated)
+(
+telegram_id,
+tag,
+updated
+)
 VALUES(?,?,?)
 `
 ).run(
@@ -340,35 +355,54 @@ Date.now()
 
 
 
-
 let upgrades=[];
 
 
 
-function scan(array){
+
+function scan(obj){
 
 
-if(!array)
+if(!obj)
 return;
 
 
-for(let x of array){
+
+if(Array.isArray(obj)){
 
 
-if(x.timer){
+for(let x of obj)
+scan(x);
+
+
+return;
+
+}
+
+
+
+if(typeof obj==="object"){
+
+
+
+if(
+obj.data &&
+obj.timer
+){
 
 
 upgrades.push({
 
-id:x.data,
+id:obj.data,
 
-name:itemName(x.data),
+name:itemName(obj.data),
 
-level:x.lvl || 0,
+level:
+obj.lvl || 0,
+
 
 finish:
-Math.floor(Date.now()/1000)
-+x.timer
+baseTime + obj.timer
 
 });
 
@@ -377,29 +411,33 @@ Math.floor(Date.now()/1000)
 
 
 
+
+for(
+let value of Object.values(obj)
+){
+
+scan(value);
+
 }
 
 
+
 }
 
 
 
+}
 
 
-scan(json.buildings);
-scan(json.buildings2);
-scan(json.heroes);
-scan(json.heroes2);
-scan(json.spells);
-scan(json.units);
-scan(json.units2);
+
+scan(json);
 
 
 
 
 
-let insert =
-db.prepare(`
+let insert=db.prepare(
+`
 INSERT INTO upgrades
 (
 telegram_id,
@@ -410,8 +448,8 @@ level,
 finish
 )
 VALUES(?,?,?,?,?,?)
-`);
-
+`
+);
 
 
 
@@ -419,12 +457,19 @@ for(let u of upgrades){
 
 
 insert.run(
+
 chat,
+
 tag,
+
 u.id,
+
 u.name,
+
 u.level,
+
 u.finish
+
 );
 
 
@@ -433,15 +478,16 @@ u.finish
 
 
 
-bot.sendMessage(chat,
+bot.sendMessage(
+chat,
 
 `
-✅ Imported
+✅ JSON Loaded
 
-Player:
+🏰 Player:
 ${tag}
 
-Active upgrades:
+🔨 Active upgrades:
 ${upgrades.length}
 
 Use /status
@@ -452,28 +498,39 @@ Use /status
 
 
 }
+
+
+
+
+
 // ===============================
-// STATUS COMMAND
+// STATUS
 // ===============================
 
 
-bot.onText(/\/status/, msg=>{
+bot.onText(/\/status/,msg=>{
 
 
-let chat=msg.chat.id;
+const id=msg.chat.id;
 
 
-let rows =
-db.prepare(`
+let now=
+Math.floor(Date.now()/1000);
+
+
+
+let rows=db.prepare(
+`
 SELECT *
 FROM upgrades
 WHERE telegram_id=?
 AND finish>?
 ORDER BY finish
-`)
+`
+)
 .all(
-chat,
-Math.floor(Date.now()/1000)
+id,
+now
 );
 
 
@@ -481,7 +538,7 @@ Math.floor(Date.now()/1000)
 if(rows.length===0){
 
 return bot.sendMessage(
-chat,
+id,
 "✅ No active upgrades"
 );
 
@@ -489,7 +546,7 @@ chat,
 
 
 
-let text =
+let text=
 "🏰 Active Upgrades\n\n";
 
 
@@ -497,18 +554,15 @@ let text =
 for(let u of rows){
 
 
-let left =
-u.finish -
-Math.floor(Date.now()/1000);
-
-
-
-text +=
+text+=
 `
 ${u.name}
+
 Level: ${u.level}
 
-⏳ ${formatTime(left)}
+⏳ ${formatTime(
+u.finish-now
+)}
 
 `;
 
@@ -517,62 +571,7 @@ Level: ${u.level}
 
 
 bot.sendMessage(
-chat,
-text
-);
-
-
-});
-
-
-
-
-
-
-// ===============================
-// PLAYERS COMMAND
-// ===============================
-
-
-bot.onText(/\/players/,msg=>{
-
-
-let rows =
-db.prepare(
-`
-SELECT tag
-FROM players
-WHERE telegram_id=?
-`
-)
-.all(msg.chat.id);
-
-
-
-if(rows.length===0){
-
-return bot.sendMessage(
-msg.chat.id,
-"No players added"
-);
-
-}
-
-
-
-let text="👤 Players\n\n";
-
-
-rows.forEach(p=>{
-
-text+=p.tag+"\n";
-
-});
-
-
-
-bot.sendMessage(
-msg.chat.id,
+id,
 text
 );
 
@@ -585,9 +584,8 @@ text
 
 
 
-
 // ===============================
-// CLEAR DATA
+// CLEAR
 // ===============================
 
 
@@ -613,9 +611,8 @@ db.prepare(
 
 bot.sendMessage(
 id,
-"🗑 All data cleared"
+"🗑 Data cleared"
 );
-
 
 
 });
@@ -626,37 +623,35 @@ id,
 
 
 // ===============================
-// AUTO NOTIFICATION ENGINE
+// AUTO NOTIFIER
 // ===============================
 
 
-function checkUpgrades(){
+function checkFinished(){
 
 
-let now =
+let now=
 Math.floor(Date.now()/1000);
 
 
 
-let finished =
-db.prepare(`
+let rows=db.prepare(
+`
 SELECT *
 FROM upgrades
 WHERE finish<=?
 AND notified=0
-`)
+`
+)
 .all(now);
 
 
 
-
-
-for(let u of finished){
+for(let u of rows){
 
 
 
 bot.sendMessage(
-
 u.telegram_id,
 
 `
@@ -670,11 +665,9 @@ ${u.level}
 Player:
 ${u.tag}
 
-Your builder is free!
+Builder is free!
 `
-
 );
-
 
 
 
@@ -698,65 +691,50 @@ WHERE id=?
 
 
 
-// ===============================
-// CRON CHECKER
-// ===============================
 
-
-// every 5 minutes
+// every minute
 
 cron.schedule(
-"*/5 * * * *",
+"* * * * *",
 ()=>{
 
-
-console.log(
-"Checking upgrades..."
-);
-
-
-checkUpgrades();
-
-
-});
-
-
-
-
-
-// ===============================
-// ERROR HANDLING
-// ===============================
-
-
-bot.on(
-"polling_error",
-err=>{
-
-console.log(
-"Telegram Error:",
-err.message
-);
+checkFinished();
 
 }
 );
 
 
 
-process.on(
-"uncaughtException",
-err=>{
 
-console.log(
-"Crash prevented:",
-err.message
+
+
+// ===============================
+// RENDER KEEP ALIVE
+// ===============================
+
+
+const http=require("http");
+
+
+http.createServer(
+(req,res)=>{
+
+res.write(
+"COC Bot Running"
 );
+
+res.end();
 
 }
+)
+.listen(
+process.env.PORT || 3000
 );
 
 
 
+
+
 console.log(
-"🚀 COC Upgrade Bot Online"
+"🚀 COC Upgrade Notifier Online"
 );
